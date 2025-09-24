@@ -1,0 +1,317 @@
+{
+  "name": "Preventivos La Pau - Automatización de Correos",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute",
+              "minute": 5
+            }
+          ]
+        },
+        "host": "correu.gruplapau.com",
+        "port": 143,
+        "secure": false,
+        "email": "serveispreventius@gruplapau.net",
+        "password": "={{ $credentials.emailPassword }}",
+        "format": "simple",
+        "readOnlyMode": false,
+        "options": {}
+      },
+      "id": "email-trigger",
+      "name": "Email Trigger (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "imap": {
+          "id": "email-credentials",
+          "name": "Correo Preventivos"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "email-check",
+              "leftValue": "={{ $json.from }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-emails",
+      "name": "Filtrar Correos Válidos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "nodeCredentialType": "googleAiApi",
+        "requestMethod": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "contents",
+              "value": "=[{\n  \"parts\": [{\n    \"text\": \"Analiza el siguiente correo electrónico y determina si es una solicitud de servicios preventivos médicos/sanitarios.\\n\\nSi es una solicitud, extrae la siguiente información en formato JSON:\\n{\\n  \\\"es_solicitud_preventivos\\\": true,\\n  \\\"cliente_nombre\\\": \\\"nombre del cliente/organización\\\",\\n  \\\"cliente_email\\\": \\\"{{ $node['Email Trigger (IMAP)'].json.from }}\\\",\\n  \\\"cliente_telefono\\\": \\\"teléfono si está disponible\\\",\\n  \\\"cliente_contacto\\\": \\\"persona de contacto\\\",\\n  \\\"evento\\\": \\\"tipo de evento (concierto, festival, deportivo, etc.)\\\",\\n  \\\"lugar\\\": \\\"ubicación del evento\\\",\\n  \\\"fecha_servicio\\\": \\\"fecha en formato YYYY-MM-DD\\\",\\n  \\\"hora_inicio\\\": \\\"hora de inicio en formato HH:MM:SS\\\",\\n  \\\"hora_fin\\\": \\\"hora de fin en formato HH:MM:SS\\\",\\n  \\\"recursos_solicitados\\\": \\\"recursos médicos/sanitarios mencionados\\\",\\n  \\\"observaciones\\\": \\\"información adicional relevante\\\"\\n}\\n\\nSi NO es una solicitud de servicios preventivos, responde:\\n{\\n  \\\"es_solicitud_preventivos\\\": false,\\n  \\\"motivo\\\": \\\"razón por la que no es una solicitud\\\"\\n}\\n\\nRecuerda estos recursos comunes: SVB, SVI, SVA, 1TES, MEDICO, DUI, COORDINADOR, SOCORRISTA ACUATICO, PICKUP, CARPA, PMA, EMBARCACIÓ, RETÉN, MOTO SANITARIA+DEA, BICI+2TES.\\n\\nCORREO A ANALIZAR:\\n---\\nAsunto: {{ $node['Email Trigger (IMAP)'].json.subject }}\\nDe: {{ $node['Email Trigger (IMAP)'].json.from }}\\nFecha: {{ $node['Email Trigger (IMAP)'].json.date }}\\nContenido:\\n{{ $node['Email Trigger (IMAP)'].json.text }}\\n---\\n\\nResponde ÚNICAMENTE con el JSON, sin explicaciones adicionales.\"\n  }]\n}]"
+            }
+          ]
+        }
+      },
+      "id": "gemini-ai",
+      "name": "Gemini AI Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        200
+      ],
+      "credentials": {
+        "googleAiApi": {
+          "id": "gemini-credentials",
+          "name": "Gemini API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraer y limpiar la respuesta JSON de Gemini\nconst response = items[0].json;\nlet aiText = '';\n\n// Extraer el texto de la respuesta de Gemini\nif (response.candidates && response.candidates[0] && response.candidates[0].content && response.candidates[0].content.parts) {\n  aiText = response.candidates[0].content.parts[0].text;\n} else {\n  return [{\n    json: {\n      error: 'No se pudo extraer respuesta de Gemini',\n      originalResponse: response\n    }\n  }];\n}\n\n// Limpiar la respuesta (remover markdown si existe)\nif (aiText.includes('```json')) {\n  aiText = aiText.replace(/```json\\n?/g, '').replace(/```/g, '').trim();\n}\n\ntry {\n  // Parsear el JSON\n  const aiResult = JSON.parse(aiText);\n  \n  // Agregar datos del correo original\n  const emailData = items[0].json.emailData || {};\n  \n  return [{\n    json: {\n      ...aiResult,\n      correo_original: {\n        subject: emailData.subject || '',\n        from: emailData.from || '',\n        date: emailData.date || '',\n        text: emailData.text || ''\n      }\n    }\n  }];\n} catch (error) {\n  return [{\n    json: {\n      error: 'Error parseando JSON de IA',\n      aiText: aiText,\n      parseError: error.message\n    }\n  }];\n}"
+      },
+      "id": "process-ai-response",
+      "name": "Procesar Respuesta IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-preventive-request",
+              "leftValue": "={{ $json.es_solicitud_preventivos }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-preventive",
+      "name": "¿Es Solicitud Preventiva?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "preventivos_presupuestos",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fecha_solicitud": "={{ $now.format('yyyy-MM-dd') }}",
+            "cliente_nombre": "={{ $json.cliente_nombre || 'Cliente no especificado' }}",
+            "cliente_email": "={{ $json.cliente_email }}",
+            "cliente_telefono": "={{ $json.cliente_telefono || '' }}",
+            "cliente_contacto": "={{ $json.cliente_contacto || '' }}",
+            "evento": "={{ $json.evento || 'Evento no especificado' }}",
+            "lugar": "={{ $json.lugar || 'Lugar no especificado' }}",
+            "fecha_servicio": "={{ $json.fecha_servicio || $now.plus({days: 1}).format('yyyy-MM-dd') }}",
+            "hora_inicio": "={{ $json.hora_inicio || '09:00:00' }}",
+            "hora_fin": "={{ $json.hora_fin || '18:00:00' }}",
+            "recursos_solicitados": "={{ $json.recursos_solicitados || '' }}",
+            "observaciones": "={{ $json.observaciones || 'Generado automáticamente por N8N' }}",
+            "correo_original": "=Asunto: {{ $json.correo_original.subject }}\\nDe: {{ $json.correo_original.from }}\\nFecha: {{ $json.correo_original.date }}\\n\\n{{ $json.correo_original.text }}",
+            "status_aprobado": 0,
+            "convertido_servicio": 0,
+            "fecha_creacion": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}",
+            "fecha_modificacion": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "insert-budget",
+      "name": "Insertar Presupuesto",
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        100
+      ],
+      "credentials": {
+        "microsoftSql": {
+          "id": "sql-server-credentials",
+          "name": "SQL Server La Pau"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "serveispreventius@gruplapau.net",
+        "toEmail": "administracion@gruplapau.net",
+        "subject": "🤖 Nuevo Presupuesto Generado Automáticamente",
+        "message": "=🤖 NUEVO PRESUPUESTO GENERADO AUTOMÁTICAMENTE\\n\\nCliente: {{ $node['Procesar Respuesta IA'].json.cliente_nombre }}\\nEmail: {{ $node['Procesar Respuesta IA'].json.cliente_email }}\\nEvento: {{ $node['Procesar Respuesta IA'].json.evento }}\\nFecha: {{ $node['Procesar Respuesta IA'].json.fecha_servicio }}\\nLugar: {{ $node['Procesar Respuesta IA'].json.lugar }}\\nRecursos: {{ $node['Procesar Respuesta IA'].json.recursos_solicitados }}\\n\\nEl presupuesto está disponible en la sección \\\"Por Aprobar\\\" del sistema.\\n\\nAccede al sistema: http://localhost:8501\\n\\n---\\nCorreo original:\\nAsunto: {{ $node['Procesar Respuesta IA'].json.correo_original.subject }}\\nDe: {{ $node['Procesar Respuesta IA'].json.correo_original.from }}",
+        "options": {}
+      },
+      "id": "send-notification",
+      "name": "Enviar Notificación",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        100
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials",
+          "name": "SMTP La Pau"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log para correos que no son solicitudes preventivas\nconst data = items[0].json;\n\nconsole.log('📧 Correo descartado:', {\n  from: data.correo_original?.from || 'Desconocido',\n  subject: data.correo_original?.subject || 'Sin asunto',\n  motivo: data.motivo || 'No especificado'\n});\n\nreturn [{\n  json: {\n    action: 'discarded',\n    reason: data.motivo,\n    email_from: data.correo_original?.from,\n    email_subject: data.correo_original?.subject\n  }\n}];"
+      },
+      "id": "log-discarded",
+      "name": "Log Correo Descartado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Email Trigger (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Correos Válidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Correos Válidos": {
+      "main": [
+        [
+          {
+            "node": "Gemini AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "Procesar Respuesta IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar Respuesta IA": {
+      "main": [
+        [
+          {
+            "node": "¿Es Solicitud Preventiva?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es Solicitud Preventiva?": {
+      "main": [
+        [
+          {
+            "node": "Insertar Presupuesto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Correo Descartado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insertar Presupuesto": {
+      "main": [
+        [
+          {
+            "node": "Enviar Notificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-12-23T10:00:00.000Z",
+  "versionId": "1"
+}

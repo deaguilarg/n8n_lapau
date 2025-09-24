@@ -1,0 +1,82 @@
+# 🐳 Docker Compose - N8N Preventivos La Pau
+version: '3.8'
+
+services:
+  n8n:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: n8n-preventivos-lapau
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Autenticación
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=lapau2025
+      
+      # Configuración de red
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      
+      # Base de datos
+      - DB_TYPE=sqlite
+      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
+      - DB_SQLITE_POOL_SIZE=5
+      
+      # Optimizaciones
+      - N8N_DISABLE_PRODUCTION_MAIN_PROCESS=true
+      - N8N_SKIP_WEBHOOK_DEREGISTRATION_SHUTDOWN=true
+      - N8N_DISABLE_UI=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - N8N_TEMPLATES_ENABLED=false
+      
+      # Seguridad y funcionalidad
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_RUNNERS_ENABLED=true
+      
+      # Timezone
+      - TZ=Europe/Madrid
+      
+      # Configuración adicional
+      - N8N_ENCRYPTION_KEY=lapau-preventivos-2025-encryption-key
+      - N8N_USER_MANAGEMENT_DISABLED=true
+      
+    volumes:
+      # Persistencia de datos
+      - n8n_data:/home/node/.n8n
+      
+      # Workflows y configuración
+      - ./workflows:/home/node/.n8n/workflows:rw
+      - ./credentials:/home/node/.n8n/credentials:rw
+      - ./logs:/home/node/.n8n/logs:rw
+      
+      # Archivos temporales para procesamiento
+      - ./temp:/tmp/n8n:rw
+      
+    networks:
+      - n8n_network
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      
+    labels:
+      - "traefik.enable=false"
+      - "com.docker.compose.service=n8n-preventivos"
+
+volumes:
+  n8n_data:
+    driver: local
+    name: n8n_preventivos_data
+
+networks:
+  n8n_network:
+    driver: bridge
+    name: n8n_preventivos_network
